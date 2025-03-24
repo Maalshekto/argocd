@@ -1,20 +1,121 @@
-# nginx-deployment.yaml
-   apiVersion: apps/v1
-   kind: Deployment
-   metadata:
-     name: nginx-deployment
-   spec:
-     replicas: 1
-     selector:
-       matchLabels:
-         app: nginx
-     template:
-       metadata:
-         labels:
-           app: nginx
-       spec:
-         containers:
-         - name: nginx
-           image: nginx:latest
-           ports:
-           - containerPort: 80
+# Création des namespaces
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: frontend
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: backend
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: database
+---
+# Déploiement du pod nginx dans le namespace frontend avec un label
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx
+  namespace: frontend
+  labels:
+    app: nginx
+spec:
+  containers:
+  - name: nginx
+    image: nginx:latest
+---
+# Création du service pour nginx dans le namespace frontend
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx
+  namespace: frontend
+spec:
+  selector:
+    app: nginx
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+---
+# Déploiement du pod api dans le namespace backend
+apiVersion: v1
+kind: Pod
+metadata:
+  name: api
+  namespace: backend
+  labels:
+    app: api
+spec:
+  containers:
+  - name: api
+    image: hashicorp/http-echo:latest
+    args: ["-text=Hello from API"]
+---
+# Déploiement du pod postgres dans le namespace database avec un label
+apiVersion: v1
+kind: Pod
+metadata:
+  name: postgres
+  namespace: database
+  labels:
+    app: postgres
+spec:
+  containers:
+  - name: postgres
+    image: postgres:latest
+    env:
+    - name: POSTGRES_PASSWORD
+      value: "monmotdepasse"
+---
+# Création du service pour postgres dans le namespace database
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: database
+spec:
+  selector:
+    app: postgres
+  ports:
+  - protocol: TCP
+    port: 5432
+    targetPort: 5432
+---
+# Déploiement d'une application de simulation de trafic dans le namespace backend
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: traffic-simulator
+  namespace: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: traffic-simulator
+  template:
+    metadata:
+      labels:
+        app: traffic-simulator
+    spec:
+      containers:
+      - name: simulator
+        image: alpine:latest
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            apk update && apk add --no-cache curl postgresql-client && \
+            while true; do
+              echo "Appel de nginx (frontend)...";
+              curl -s http://nginx.frontend.svc.cluster.local || true;
+              echo "Connexion à postgres (database)...";
+              PGPASSWORD=monmotdepasse psql -h postgres.database.svc.cluster.local -U postgres -c "SELECT 1" || true;
+              sleep 5;
+            done
+        securityContext:
+          capabilities:
+            add:
+              - NET_RAW
